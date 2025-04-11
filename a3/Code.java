@@ -7,47 +7,71 @@
 
 package a3;
 
+import java.io.*;
+import java.util.*;
+import java.nio.*;
+import java.lang.Math;
 import javax.swing.*;
 
 import static com.jogamp.opengl.GL.GL_ARRAY_BUFFER;
+import static com.jogamp.opengl.GL.GL_CCW;
 import static com.jogamp.opengl.GL.GL_COLOR_BUFFER_BIT;
+import static com.jogamp.opengl.GL.GL_CULL_FACE;
 import static com.jogamp.opengl.GL.GL_DEPTH_BUFFER_BIT;
 import static com.jogamp.opengl.GL.GL_DEPTH_TEST;
 import static com.jogamp.opengl.GL.GL_FLOAT;
 import static com.jogamp.opengl.GL.GL_LEQUAL;
+import static com.jogamp.opengl.GL.GL_LINES;
+import static com.jogamp.opengl.GL.GL_REPEAT;
 import static com.jogamp.opengl.GL.GL_STATIC_DRAW;
 import static com.jogamp.opengl.GL.GL_TEXTURE0;
 import static com.jogamp.opengl.GL.GL_TEXTURE_2D;
+import static com.jogamp.opengl.GL.GL_TEXTURE_CUBE_MAP;
+import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_S;
+import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_T;
 import static com.jogamp.opengl.GL.GL_TRIANGLES;
+import static com.jogamp.opengl.GL2GL3.GL_TEXTURE_CUBE_MAP_SEAMLESS;
+
+import static com.jogamp.opengl.GL.GL_ARRAY_BUFFER;
+import static com.jogamp.opengl.GL.GL_CCW;
+import static com.jogamp.opengl.GL.GL_COLOR_BUFFER_BIT;
+import static com.jogamp.opengl.GL.GL_CULL_FACE;
+import static com.jogamp.opengl.GL.GL_DEPTH_BUFFER_BIT;
+import static com.jogamp.opengl.GL.GL_DEPTH_TEST;
+import static com.jogamp.opengl.GL.GL_FLOAT;
+import static com.jogamp.opengl.GL.GL_LEQUAL;
+import static com.jogamp.opengl.GL.GL_LINES;
+import static com.jogamp.opengl.GL.GL_REPEAT;
+import static com.jogamp.opengl.GL.GL_STATIC_DRAW;
+import static com.jogamp.opengl.GL.GL_TEXTURE0;
+import static com.jogamp.opengl.GL.GL_TEXTURE_2D;
+import static com.jogamp.opengl.GL.GL_TEXTURE_CUBE_MAP;
+import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_S;
+import static com.jogamp.opengl.GL.GL_TEXTURE_WRAP_T;
+import static com.jogamp.opengl.GL.GL_TRIANGLES;
+import static com.jogamp.opengl.GL2GL3.GL_TEXTURE_CUBE_MAP_SEAMLESS;
 import static com.jogamp.opengl.GL4.*;
-
-import com.jogamp.common.nio.Buffers;
 import com.jogamp.opengl.*;
-import com.jogamp.opengl.awt.GLCanvas;
 import com.jogamp.opengl.util.*;
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.KeyEvent;
-import java.awt.event.KeyListener;
-import java.lang.Math;
-import java.lang.Math.*;
-import java.nio.FloatBuffer;
-import java.io.*;
-import java.util.*;
-
+import com.jogamp.opengl.awt.GLCanvas;
+import com.jogamp.opengl.util.texture.*;
+import com.jogamp.common.nio.Buffers;
 import org.joml.*;
+import java.awt.*;
+import java.awt.event.*;
 
 public class Code extends JFrame implements GLEventListener, KeyListener{	
 	private GLCanvas myCanvas;
-	private int renderingProgram;
+	private int renderingProgram, renderingProgramCubeMap;
 
 	//Models & Objects
 	private final int numOfModels = 6;
-	private final int numOfObjects = 10;
+	private final int numOfObjects = 11;
 	private int vao[] = new int[1];
 	private int vbo[] = new int[numOfObjects*3]; //3 VBOs per model
 	private ImportedModel models[] = new ImportedModel[numOfModels];
 	private int textures[] = new int[numOfObjects];
+	private int skyboxTexture;
 	private Platform plat = new Platform();
 	private boolean areAxesVisible = true;
 
@@ -81,7 +105,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private Matrix4f[] modelMatrices = new Matrix4f[numOfObjects]; //Stores all the model matrices for all models
 	private Matrix4f mMat, temp = new Matrix4f();  // model matrix for temporary use per model
 	private Matrix4f mvMat = new Matrix4f(); // model-view matrix
-	private int mvLoc, pLoc;
+	private int mvLoc, pLoc, vLoc;
 	private float aspect;
 	private float deltaTime = 0.0f;
 	private float pitchAmount = 0.02f;
@@ -146,10 +170,16 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 
 		renderingProgram = Utils.createShaderProgram("a3/vertShader.glsl", "a3/fragShader.glsl");
 
+		renderingProgramCubeMap = Utils.createShaderProgram("a3/vertCShader.glsl", "a3/fragCShader.glsl");
+
 		float aspect = (float) myCanvas.getWidth() / (float) myCanvas.getHeight();
 		pMat.identity().setPerspective((float) Math.toRadians(100.0f), aspect, 0.1f, 1000.0f);
 
 		setupVertices();
+
+		skyboxTexture = Utils.loadCubeMap("cubeMap");
+		gl.glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
+
 
 		//Set default camera location
 		cam.setLocation(new Vector3f(DEFAULT_CAM_X, DEFAULT_CAM_Y, DEFAULT_CAM_Z));
@@ -157,6 +187,33 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 
 	public void display(GLAutoDrawable drawable){	
 		GL4 gl = (GL4) GLContext.getCurrentGL();
+
+		//Get view matrix for the current frame
+		vMat.set(cam.buildViewMatrix());
+		
+		// draw cube map
+		
+		gl.glUseProgram(renderingProgramCubeMap);
+
+		vLoc = gl.glGetUniformLocation(renderingProgramCubeMap, "v_matrix");
+		gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
+
+		pLoc = gl.glGetUniformLocation(renderingProgramCubeMap, "p_matrix");
+		gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+				
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))]);
+		gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+		gl.glEnableVertexAttribArray(0);
+		
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
+
+		gl.glEnable(GL_CULL_FACE);
+		gl.glFrontFace(GL_CCW);	     // cube is CW, but we are viewing the inside
+		gl.glDisable(GL_DEPTH_TEST);
+		gl.glDrawArrays(GL_TRIANGLES, 0, 36);
+		gl.glEnable(GL_DEPTH_TEST);
+
 
 		//Clears color & depth buffers to default and uses prev. created renderingProgram object
 		gl.glClear(GL_COLOR_BUFFER_BIT);
@@ -172,14 +229,11 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 
 	public void updateObjects(GL4 gl){
 		//Gets int pointer to mv_matrix uniform variable
-		int mvLoc = gl.glGetUniformLocation(renderingProgram, "mv_matrix");
+		mvLoc = gl.glGetUniformLocation(renderingProgram, "mv_matrix");
 
 		//Gets int pointer to p_matrix uniform variable
-		int pLoc = gl.glGetUniformLocation(renderingProgram, "p_matrix");
+		pLoc = gl.glGetUniformLocation(renderingProgram, "p_matrix");
 		
-		//Get view matrix for the current frame
-		vMat.set(cam.buildViewMatrix());
-
 		//Iterates through every single object (with a model) in the scene and updates their local positions into the world
 		//using their respective model matrix and based on the view, perspective matrices as well
 		for (int i = 0; i < numOfModels; i++){
@@ -395,6 +449,28 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 3))+2]);
 		norBuf = Buffers.newDirectFloatBuffer(nvalues);
 		gl.glBufferData(GL_ARRAY_BUFFER, norBuf.limit()*4,norBuf, GL_STATIC_DRAW);
+
+		//Skybox
+		// cube
+		float[] cubeVertexPositions =
+		{	-1.0f,  1.0f, -1.0f, -1.0f, -1.0f, -1.0f, 1.0f, -1.0f, -1.0f,
+			1.0f, -1.0f, -1.0f, 1.0f,  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,
+			1.0f, -1.0f, -1.0f, 1.0f, -1.0f,  1.0f, 1.0f,  1.0f, -1.0f,
+			1.0f, -1.0f,  1.0f, 1.0f,  1.0f,  1.0f, 1.0f,  1.0f, -1.0f,
+			1.0f, -1.0f,  1.0f, -1.0f, -1.0f,  1.0f, 1.0f,  1.0f,  1.0f,
+			-1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f, 1.0f,  1.0f,  1.0f,
+			-1.0f, -1.0f,  1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f,  1.0f,
+			-1.0f, -1.0f, -1.0f, -1.0f,  1.0f, -1.0f, -1.0f,  1.0f,  1.0f,
+			-1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f, -1.0f, -1.0f,
+			1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f,
+			-1.0f,  1.0f, -1.0f, 1.0f,  1.0f, -1.0f, 1.0f,  1.0f,  1.0f,
+			1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f, -1.0f
+		};
+
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))]);
+		FloatBuffer cvertBuf = Buffers.newDirectFloatBuffer(cubeVertexPositions);
+		gl.glBufferData(GL_ARRAY_BUFFER, cvertBuf.limit()*4, cvertBuf, GL_STATIC_DRAW);
+
 	}
 
 	//Calculates the amount of time between the current frame and previous frame, sets deltaTime to the difference
