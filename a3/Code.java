@@ -65,16 +65,19 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private int renderingProgram, renderingProgramCubeMap;
 
 	//Models & Objects
-	private final int numOfModels = 5;
-	private final int numOfObjects = 10;
+	private final int numOfModels = 8;
+	private final int numOfObjects = numOfModels + 5;
 	private int vao[] = new int[1];
 	private int vbo[] = new int[numOfObjects*3]; //3 VBOs per model
-	private int skyboxVBO[] = new int[1];
 	private ImportedModel models[] = new ImportedModel[numOfModels];
 	private int textures[] = new int[numOfObjects];
-	private int skyboxTexture;
 	private Platform plat = new Platform();
 	private boolean areAxesVisible = true;
+
+	//Skybox
+	private int skyboxVBO[] = new int[1];
+	private int skyboxTexture;
+	private Matrix4f skyboxModelMat = new Matrix4f();
 
 	//Used for position, texture coordinates, and normal vector values and plugging them into buffers
 	private ArrayList<float[]> allpvalues = new ArrayList<float[]>();
@@ -120,34 +123,33 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private float axisLineLength = 50f; //Made to be large enough so you can see it outside the inner chamber
 
 	//Lights
-	private Vector3f initialLightLoc = new Vector3f(15.0f, 20.0f, 0.0f);
+	private Vector3f initialLightLoc = new Vector3f(0.0f, 2.6f, 0.0f);
 	private float amt = 0.0f;
 	private Vector3f currentLightPos = new Vector3f();
 	private float[] lightPos = new float[3];
 
 	private int globalAmbLoc, ambLoc, diffLoc, specLoc, posLoc, mambLoc, mdiffLoc, mspecLoc, mshiLoc;
 
-	// white light properties
-	float[] globalAmbient = new float[] { 0.6f, 0.6f, 0.6f, 1.0f };
+	//White light properties
+	float[] globalAmbient = new float[] { 0.8f, 0.8f, 0.8f, 1.0f };
 	float[] lightAmbient = new float[] { 0.1f, 0.1f, 0.1f, 1.0f };
 	float[] lightDiffuse = new float[] { 1.0f, 1.0f, 1.0f, 1.0f };
 	float[] lightSpecular = new float[] { 1.0f, 1.0f, 1.0f, 1.0f };
 		
 	//Materials
-
 	private final int DEFAULT_MATERIAL = 0;
 	private int material = DEFAULT_MATERIAL;
 
-	// gold material
-	float[] goldMatAmb = Utils.goldAmbient();
-	float[] goldMatDif = Utils.goldDiffuse();
-	float[] goldMatSpe = Utils.goldSpecular();
+	//Material 1 (Reddish)
+	float[] goldMatAmb = {1.0f, 0.3f, 0.3f};
+	float[] goldMatDif = {0.7f, 0.2f, 0.2f};
+	float[] goldMatSpe = {0.7f, 0.7f, 0.7f};
 	float goldMatShi = Utils.goldShininess();
 
-	// gold material
-	float[] bronzeMatAmb = Utils.bronzeAmbient();
-	float[] bronzeMatDif = Utils.bronzeDiffuse();
-	float[] bronzeMatSpe = Utils.bronzeSpecular();
+	//Material 2 (White)
+	float[] bronzeMatAmb = {0.7f, 0.7f, 0.7f};
+	float[] bronzeMatDif = {0.7f, 0.7f, 0.7f};
+	float[] bronzeMatSpe = {0.7f, 0.7f, 0.7f};
 	float bronzeMatShi = Utils.bronzeShininess();
 
 	public Code()
@@ -191,15 +193,29 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		textures[4] = Utils.loadTexture("textures/brick1.jpg"); //From the book
 		modelMatrices[4].translate(new Vector3f(0f, -0.25f, 0f)); // Starts off lower in the world
 
+		models[5] = new ImportedModel("models/crazyeye.obj");
+		textures[5] = Utils.loadTexture("textures/crazyeye.png");
+		modelMatrices[5].rotateX((float) Math.toRadians(90.0));
+		modelMatrices[5].scale(new Vector3f(0.25f, 0.25f, 0.25f));
+
+		models[6] = new ImportedModel("models/outerStars1.obj");
+		textures[6] = Utils.loadTexture("textures/Star.jpg");
+		modelMatrices[6].scale(new Vector3f(0.90f, 0.90f, 0.90f));
+
+		models[7] = new ImportedModel("models/outerStars2.obj");
+		textures[7] = Utils.loadTexture("textures/Star.jpg");
+
 		//Objects without any external models
-		textures[5] = Utils.loadTexture("textures/ground.jpg"); //From online site
+		textures[numOfModels] = Utils.loadTexture("textures/eyefloor.png"); //Custom
 		modelMatrices[numOfModels].translate(new Vector3f(0f, -3f, 0f)); // Starts off lower in the world
 		
-		textures[6] = Utils.loadTexture("textures/X.png");
+		textures[numOfModels+1] = Utils.loadTexture("textures/X.png");
 
-		textures[7] = Utils.loadTexture("textures/Y.png");
+		textures[numOfModels+2] = Utils.loadTexture("textures/Y.png");
 
-		textures[8] = Utils.loadTexture("textures/Z.png");
+		textures[numOfModels+3] = Utils.loadTexture("textures/Z.png");
+
+		textures[numOfModels+4] = Utils.loadTexture("textures/sun.png");
 
 		renderingProgram = Utils.createShaderProgram("a3/vertShader.glsl", "a3/fragShader.glsl");
 
@@ -211,6 +227,8 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		setupVertices();
 
 		skyboxTexture = Utils.loadCubeMap("cubeMap");
+		skyboxModelMat.identity();
+
 		gl.glEnable(GL_TEXTURE_CUBE_MAP_SEAMLESS);
 
 
@@ -229,6 +247,11 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		
 		// draw cube map
 		gl.glUseProgram(renderingProgramCubeMap);
+
+		skyboxModelMat.rotateY((float)Math.toRadians(rotationSpeed * 5 * deltaTime));
+
+		mLoc = gl.glGetUniformLocation(renderingProgram, "m_matrix");
+		gl.glUniformMatrix4fv(mLoc, 1, false, skyboxModelMat.get(vals));
 
 		vLoc = gl.glGetUniformLocation(renderingProgramCubeMap, "v_matrix");
 		gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
@@ -257,7 +280,6 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		calculateDeltaTime();
 
 		currentLightPos.set(initialLightLoc);
-		amt += deltaTime * 0.03f;
 		currentLightPos.rotateAxis((float)Math.toRadians(amt), 0.0f, 0.0f, 1.0f);
 
 		//Update all objects in the scene and draw them to the screen
@@ -285,6 +307,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		for (int i = 0; i < numOfModels; i++){
 			mMat = modelMatrices[i];
 			invTrMat = invTrsMatrices[i];
+			invTrMat.identity();
 
 			material = DEFAULT_MATERIAL; //default is 0
 
@@ -297,12 +320,18 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 				floatingState %= (2 * java.lang.Math.PI);
 			}
 			//If it's the star, rotate it about the Y axis
-			else if (i == 2)
+			else if (i == 2  || i == 6 || i ==7){
+				material = 1;
 				mMat.rotateY((float)Math.toRadians(-rotationSpeed * 5 * deltaTime));
+			}
 			//If it is the inner chamber object, rotate it about the Y axis
 			else if (i == 3) 
 				mMat.rotateY((float)Math.toRadians(rotationSpeed * deltaTime));
-			
+			//If it is the eye, set its location to the light's position
+			else if (i == 5){
+				material = 1;
+				mMat.setColumn(3, new Vector4f(currentLightPos.x, currentLightPos.y, currentLightPos.z, 1.0f));
+			}
 
 			mMat.invert(invTrMat);
 			invTrMat.transpose(invTrMat);
@@ -328,6 +357,10 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 			gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+1]);
 			gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
 			gl.glEnableVertexAttribArray(1);
+
+			//gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+2]);
+			//gl.glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
+			//gl.glEnableVertexAttribArray(2);
 
 			gl.glActiveTexture(GL_TEXTURE0);
 			gl.glBindTexture(GL_TEXTURE_2D, textures[i]);
@@ -406,6 +439,33 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 				gl.glDrawArrays(GL_LINES, 0, 2);
 			}
 		}
+
+		//Sun dot for moveable light
+		mMat = modelMatrices[(numOfModels + 4)];
+		mMat.setColumn(3, new Vector4f(currentLightPos.x, currentLightPos.y, currentLightPos.z, 1.0f));
+		modelMatrices[(numOfModels + 4)] = mMat;
+		mvMat.identity();
+		mvMat.mul(vMat);
+		mvMat.mul(mMat);
+
+		gl.glUniformMatrix4fv(mvLoc, 1, false, mvMat.get(vals));
+		gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(numOfModels + 4)*3]);
+		gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+		gl.glEnableVertexAttribArray(0);
+
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[((numOfModels + 4)*3)+1]);
+		gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
+		gl.glEnableVertexAttribArray(1);
+
+		gl.glActiveTexture(GL_TEXTURE0);
+		gl.glBindTexture(GL_TEXTURE_2D, textures[(numOfModels + 4)]);
+
+		gl.glEnable(GL_DEPTH_TEST);
+		gl.glDepthFunc(GL_LEQUAL);
+		
+		gl.glDrawArrays(GL_POINTS, 0, 1);
 	}
 
 	private void installLights()
@@ -582,6 +642,21 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		FloatBuffer cvertBuf = Buffers.newDirectFloatBuffer(cubeVertexPositions);
 		gl.glBufferData(GL_ARRAY_BUFFER, cvertBuf.limit()*4, cvertBuf, GL_STATIC_DRAW);
 
+		//Yellow dot for light
+		numObjVertices = 1;
+		pvalues = new float[]{0.0f, 0.0f, 0.0f};
+
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[3*(numOfModels + 4)]);
+		vertBuf = Buffers.newDirectFloatBuffer(pvalues);
+		gl.glBufferData(GL_ARRAY_BUFFER, vertBuf.limit()*4, vertBuf, GL_STATIC_DRAW);
+
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))+1]);
+		texBuf = Buffers.newDirectFloatBuffer(tvalues);
+		gl.glBufferData(GL_ARRAY_BUFFER, texBuf.limit()*4, texBuf, GL_STATIC_DRAW);
+		
+		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))+2]);
+		norBuf = Buffers.newDirectFloatBuffer(nvalues);
+		gl.glBufferData(GL_ARRAY_BUFFER, norBuf.limit()*4,norBuf, GL_STATIC_DRAW);
 	}
 
 	//Calculates the amount of time between the current frame and previous frame, sets deltaTime to the difference
@@ -658,6 +733,14 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 			case KeyEvent.VK_SPACE:
 				//Toggle world axis
 				areAxesVisible = !areAxesVisible;
+				break;
+			case KeyEvent.VK_COMMA:
+				//Move light back
+				amt -= deltaTime * 0.09f;
+				break;
+			case KeyEvent.VK_PERIOD:
+				//Move light forward
+				amt += deltaTime * 0.09f;
 				break;
 		}
 	}
