@@ -65,7 +65,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private int renderingProgram, renderingProgramCubeMap;
 
 	//Models & Objects
-	private final int numOfModels = 8;
+	private final int numOfModels = 9;
 	private final int numOfObjects = numOfModels + 5;
 	private int vao[] = new int[1];
 	private int vbo[] = new int[numOfObjects*3]; //3 VBOs per model
@@ -78,6 +78,9 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private int skyboxVBO[] = new int[1];
 	private int skyboxTexture;
 	private Matrix4f skyboxModelMat = new Matrix4f();
+
+	//Matrix Stacks
+	private Matrix4fStack mvStack = new Matrix4fStack(5);
 
 	//Used for position, texture coordinates, and normal vector values and plugging them into buffers
 	private ArrayList<float[]> allpvalues = new ArrayList<float[]>();
@@ -111,6 +114,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private Matrix4f mMat, invTrMat, temp = new Matrix4f();  // model/normal matrix for temporary use per model
 	private Matrix4f mvMat = new Matrix4f(); // model-view matrix
 	private int mvLoc, pLoc, vLoc, mLoc, nLoc;
+	private double rotateInc = 0.0;
 	private float aspect;
 	private float deltaTime = 0.0f;
 	private float pitchAmount = 0.02f;
@@ -186,12 +190,11 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		models[3] = new ImportedModel("models/Chamber.obj");
 		textures[3] = Utils.loadTexture("textures/Chamber.jpg");
 
+		models[4] = new ImportedModel("models/UpperChamber.obj");
+		textures[4] = Utils.loadTexture("textures/Star.jpg");
+
 		//models[4] = new ImportedModel("models/FakeSkybox.obj");
 		//textures[4] = Utils.loadTexture("textures/FakeSkybox.jpg");
-
-		models[4] = new ImportedModel("models/Cone.obj");
-		textures[4] = Utils.loadTexture("textures/brick1.jpg"); //From the book
-		modelMatrices[4].translate(new Vector3f(0f, -0.25f, 0f)); // Starts off lower in the world
 
 		models[5] = new ImportedModel("models/crazyeye.obj");
 		textures[5] = Utils.loadTexture("textures/crazyeye.png");
@@ -204,6 +207,10 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 
 		models[7] = new ImportedModel("models/outerStars2.obj");
 		textures[7] = Utils.loadTexture("textures/Star.jpg");
+
+		models[8] = new ImportedModel("models/Cone.obj");
+		textures[8] = Utils.loadTexture("textures/brick1.jpg"); //From the book
+		modelMatrices[8].translate(new Vector3f(0f, -0.25f, 0f)); // Starts off lower in the world
 
 		//Objects without any external models
 		textures[numOfModels] = Utils.loadTexture("textures/eyefloor.png"); //Custom
@@ -320,13 +327,13 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 				floatingState %= (2 * java.lang.Math.PI);
 			}
 			//If it's the star, rotate it about the Y axis
-			else if (i == 2  || i == 6 || i ==7){
+			else if (i == 6 || i ==7){
 				material = 1;
 				mMat.rotateY((float)Math.toRadians(-rotationSpeed * 5 * deltaTime));
 			}
-			//If it is the inner chamber object, rotate it about the Y axis
-			else if (i == 3) 
-				mMat.rotateY((float)Math.toRadians(rotationSpeed * deltaTime));
+			else if (i == 3){
+				mMat.rotateY((float)Math.toRadians(rotationSpeed * 5 * deltaTime));
+			}
 			//If it is the eye, set its location to the light's position
 			else if (i == 5){
 				material = 1;
@@ -342,33 +349,120 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 			mvMat.mul(vMat);
 			mvMat.mul(mMat);
 
-			installLights();
+			//If it is the inner star, rotate it about the Y axis
+			//If upper chamber, move it w/ parent being the star
+			if (i == 2) {
+				mvStack.pushMatrix();
+				mvStack.identity();
+				mvStack.set(vMat);
 
-			gl.glUniformMatrix4fv(mvLoc, 1, false, mvMat.get(vals));
-			gl.glUniformMatrix4fv(mLoc, 1, false, mMat.get(vals));
-			gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
-			gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
-			gl.glUniformMatrix4fv(nLoc, 1, false, invTrMat.get(vals));
+				//Inner Star
+				mvStack.pushMatrix();
+				mvStack.translate(0.0f, ((float) Math.sin(rotateInc))/5.0f, 0.0f);
+				mvStack.pushMatrix();
+				rotateInc += rotationSpeed/10 * deltaTime;
+				//mvStack.rotateY((float)Math.toRadians((rotateInc * deltaTime)%360));
 
-			gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[i*3]);
-			gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
-			gl.glEnableVertexAttribArray(0);
+				material = 1;
 
-			gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+1]);
-			gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
-			gl.glEnableVertexAttribArray(1);
+				installLights();
 
-			//gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+2]);
-			//gl.glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
-			//gl.glEnableVertexAttribArray(2);
+				gl.glUniformMatrix4fv(mvLoc, 1, false, mvStack.get(vals));
+				gl.glUniformMatrix4fv(mLoc, 1, false, mMat.get(vals));
+				gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
+				gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+				gl.glUniformMatrix4fv(nLoc, 1, false, invTrMat.get(vals));
 
-			gl.glActiveTexture(GL_TEXTURE0);
-			gl.glBindTexture(GL_TEXTURE_2D, textures[i]);
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[i*3]);
+				gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(0);
 
-			gl.glEnable(GL_DEPTH_TEST);
-			gl.glDepthFunc(GL_LEQUAL);
-			
-			gl.glDrawArrays(GL_TRIANGLES, 0, models[i].getNumVertices());
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+1]);
+				gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(1);
+
+				//gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+2]);
+				//gl.glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
+				//gl.glEnableVertexAttribArray(2);
+
+				gl.glActiveTexture(GL_TEXTURE0);
+				gl.glBindTexture(GL_TEXTURE_2D, textures[i]);
+
+				gl.glEnable(GL_DEPTH_TEST);
+				gl.glDepthFunc(GL_LEQUAL);
+				
+				gl.glDrawArrays(GL_TRIANGLES, 0, models[i].getNumVertices());
+
+				mvStack.popMatrix();
+
+				//Upper Chamber
+				mvStack.pushMatrix();
+				mvStack.translate((float)Math.sin(rotateInc/8.12), 0, 0);
+				mvStack.pushMatrix();
+
+				material = 0;
+
+				installLights();
+
+				gl.glUniformMatrix4fv(mvLoc, 1, false, mvStack.get(vals));
+				gl.glUniformMatrix4fv(mLoc, 1, false, mMat.get(vals));
+				gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
+				gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+				gl.glUniformMatrix4fv(nLoc, 1, false, invTrMat.get(vals));
+
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i+2)*3]);
+				gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(0);
+
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[((i+2)*3)+1]);
+				gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(1);
+
+				//gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+2]);
+				//gl.glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
+				//gl.glEnableVertexAttribArray(2);
+
+				gl.glActiveTexture(GL_TEXTURE0);
+				gl.glBindTexture(GL_TEXTURE_2D, textures[i+2]);
+
+				gl.glEnable(GL_DEPTH_TEST);
+				gl.glDepthFunc(GL_LEQUAL);
+				
+				gl.glDrawArrays(GL_TRIANGLES, 0, models[i+2].getNumVertices());
+
+				//Cleanup
+				mvStack.popMatrix(); mvStack.popMatrix(); mvStack.popMatrix(); mvStack.popMatrix();
+			}
+			else if (i == 4){}
+			else {
+				installLights();
+
+				gl.glUniformMatrix4fv(mvLoc, 1, false, mvMat.get(vals));
+				gl.glUniformMatrix4fv(mLoc, 1, false, mMat.get(vals));
+				gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
+				gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+				gl.glUniformMatrix4fv(nLoc, 1, false, invTrMat.get(vals));
+
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[i*3]);
+				gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(0);
+
+				gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+1]);
+				gl.glVertexAttribPointer(1, 2, GL_FLOAT, false, 0, 0);
+				gl.glEnableVertexAttribArray(1);
+
+				//gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(i*3)+2]);
+				//gl.glVertexAttribPointer(1, 3, GL_FLOAT, false, 0, 0);
+				//gl.glEnableVertexAttribArray(2);
+
+				gl.glActiveTexture(GL_TEXTURE0);
+				gl.glBindTexture(GL_TEXTURE_2D, textures[i]);
+
+				gl.glEnable(GL_DEPTH_TEST);
+				gl.glDepthFunc(GL_LEQUAL);
+				
+				gl.glDrawArrays(GL_TRIANGLES, 0, models[i].getNumVertices());
+			}
 		}
 
 		//Draws the remaining objects that don't have external models
