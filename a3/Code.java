@@ -65,10 +65,11 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private int renderingProgram, renderingProgramCubeMap;
 
 	//Models & Objects
-	private final int numOfModels = 6;
-	private final int numOfObjects = 11;
+	private final int numOfModels = 5;
+	private final int numOfObjects = 10;
 	private int vao[] = new int[1];
 	private int vbo[] = new int[numOfObjects*3]; //3 VBOs per model
+	private int skyboxVBO[] = new int[1];
 	private ImportedModel models[] = new ImportedModel[numOfModels];
 	private int textures[] = new int[numOfObjects];
 	private int skyboxTexture;
@@ -102,10 +103,11 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private FloatBuffer vals = Buffers.newDirectFloatBuffer(16);
 	private Matrix4f pMat = new Matrix4f();  // perspective matrix
 	private Matrix4f vMat = new Matrix4f();  // view matrix
+	private Matrix4f[] invTrsMatrices = new Matrix4f[numOfObjects]; //inverted transpose matrix
 	private Matrix4f[] modelMatrices = new Matrix4f[numOfObjects]; //Stores all the model matrices for all models
-	private Matrix4f mMat, temp = new Matrix4f();  // model matrix for temporary use per model
+	private Matrix4f mMat, invTrMat, temp = new Matrix4f();  // model/normal matrix for temporary use per model
 	private Matrix4f mvMat = new Matrix4f(); // model-view matrix
-	private int mvLoc, pLoc, vLoc;
+	private int mvLoc, pLoc, vLoc, mLoc, nLoc;
 	private float aspect;
 	private float deltaTime = 0.0f;
 	private float pitchAmount = 0.02f;
@@ -115,11 +117,41 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	private double floatingState = 0.0;
 	private long lastTime = 0L;
 	private long curTime = 0L;
-
 	private float axisLineLength = 50f; //Made to be large enough so you can see it outside the inner chamber
-	
+
+	//Lights
+	private Vector3f initialLightLoc = new Vector3f(15.0f, 20.0f, 0.0f);
+	private float amt = 0.0f;
+	private Vector3f currentLightPos = new Vector3f();
+	private float[] lightPos = new float[3];
+
+	private int globalAmbLoc, ambLoc, diffLoc, specLoc, posLoc, mambLoc, mdiffLoc, mspecLoc, mshiLoc;
+
+	// white light properties
+	float[] globalAmbient = new float[] { 0.6f, 0.6f, 0.6f, 1.0f };
+	float[] lightAmbient = new float[] { 0.1f, 0.1f, 0.1f, 1.0f };
+	float[] lightDiffuse = new float[] { 1.0f, 1.0f, 1.0f, 1.0f };
+	float[] lightSpecular = new float[] { 1.0f, 1.0f, 1.0f, 1.0f };
+		
+	//Materials
+
+	private final int DEFAULT_MATERIAL = 0;
+	private int material = DEFAULT_MATERIAL;
+
+	// gold material
+	float[] goldMatAmb = Utils.goldAmbient();
+	float[] goldMatDif = Utils.goldDiffuse();
+	float[] goldMatSpe = Utils.goldSpecular();
+	float goldMatShi = Utils.goldShininess();
+
+	// gold material
+	float[] bronzeMatAmb = Utils.bronzeAmbient();
+	float[] bronzeMatDif = Utils.bronzeDiffuse();
+	float[] bronzeMatSpe = Utils.bronzeSpecular();
+	float bronzeMatShi = Utils.bronzeShininess();
+
 	public Code()
-	{	setTitle("CSC 155 - Lab #2");
+	{	setTitle("CSC 155 - Lab #3");
 		setSize(900, 900);
 		myCanvas = new GLCanvas();
 		myCanvas.addGLEventListener(this);
@@ -136,6 +168,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		//Sets all mMats for all models to a default identity matrix
 		for (int i = 0; i < numOfObjects; i++){
 			modelMatrices[i] = new Matrix4f().identity();
+			invTrsMatrices[i] = new Matrix4f().identity();
 		}
 
 		//Objects with external models
@@ -151,22 +184,22 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		models[3] = new ImportedModel("models/Chamber.obj");
 		textures[3] = Utils.loadTexture("textures/Chamber.jpg");
 
-		models[4] = new ImportedModel("models/FakeSkybox.obj");
-		textures[4] = Utils.loadTexture("textures/FakeSkybox.jpg");
+		//models[4] = new ImportedModel("models/FakeSkybox.obj");
+		//textures[4] = Utils.loadTexture("textures/FakeSkybox.jpg");
 
-		models[5] = new ImportedModel("models/Cone.obj");
-		textures[5] = Utils.loadTexture("textures/brick1.jpg"); //From the book
-		modelMatrices[5].translate(new Vector3f(0f, -0.25f, 0f)); // Starts off lower in the world
+		models[4] = new ImportedModel("models/Cone.obj");
+		textures[4] = Utils.loadTexture("textures/brick1.jpg"); //From the book
+		modelMatrices[4].translate(new Vector3f(0f, -0.25f, 0f)); // Starts off lower in the world
 
 		//Objects without any external models
-		textures[6] = Utils.loadTexture("textures/ground.jpg"); //From online site
+		textures[5] = Utils.loadTexture("textures/ground.jpg"); //From online site
 		modelMatrices[numOfModels].translate(new Vector3f(0f, -3f, 0f)); // Starts off lower in the world
 		
-		textures[7] = Utils.loadTexture("textures/X.png");
+		textures[6] = Utils.loadTexture("textures/X.png");
 
-		textures[8] = Utils.loadTexture("textures/Y.png");
+		textures[7] = Utils.loadTexture("textures/Y.png");
 
-		textures[9] = Utils.loadTexture("textures/Z.png");
+		textures[8] = Utils.loadTexture("textures/Z.png");
 
 		renderingProgram = Utils.createShaderProgram("a3/vertShader.glsl", "a3/fragShader.glsl");
 
@@ -188,11 +221,13 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 	public void display(GLAutoDrawable drawable){	
 		GL4 gl = (GL4) GLContext.getCurrentGL();
 
+		gl.glClear(GL_COLOR_BUFFER_BIT);
+		gl.glClear(GL_DEPTH_BUFFER_BIT);
+
 		//Get view matrix for the current frame
 		vMat.set(cam.buildViewMatrix());
 		
 		// draw cube map
-		
 		gl.glUseProgram(renderingProgramCubeMap);
 
 		vLoc = gl.glGetUniformLocation(renderingProgramCubeMap, "v_matrix");
@@ -201,7 +236,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		pLoc = gl.glGetUniformLocation(renderingProgramCubeMap, "p_matrix");
 		gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
 				
-		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))]);
+		gl.glBindBuffer(GL_ARRAY_BUFFER, skyboxVBO[0]);
 		gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
 		gl.glEnableVertexAttribArray(0);
 		
@@ -214,14 +249,16 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		gl.glDrawArrays(GL_TRIANGLES, 0, 36);
 		gl.glEnable(GL_DEPTH_TEST);
 
-
 		//Clears color & depth buffers to default and uses prev. created renderingProgram object
-		gl.glClear(GL_COLOR_BUFFER_BIT);
-		gl.glClear(GL_DEPTH_BUFFER_BIT);
+		gl.glDisable(GL_CULL_FACE);
 		gl.glUseProgram(renderingProgram);
 
 		//Calculates delta time, used in movement functions to standardize speed across devices
 		calculateDeltaTime();
+
+		currentLightPos.set(initialLightLoc);
+		amt += deltaTime * 0.03f;
+		currentLightPos.rotateAxis((float)Math.toRadians(amt), 0.0f, 0.0f, 1.0f);
 
 		//Update all objects in the scene and draw them to the screen
 		updateObjects(gl);
@@ -231,16 +268,29 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		//Gets int pointer to mv_matrix uniform variable
 		mvLoc = gl.glGetUniformLocation(renderingProgram, "mv_matrix");
 
+		//Gets int pointer to m_matrix uniform variable
+		mLoc = gl.glGetUniformLocation(renderingProgram, "m_matrix");
+
+		//Gets int pointer to v_matrix uniform variable
+		vLoc = gl.glGetUniformLocation(renderingProgram, "v_matrix");
+
 		//Gets int pointer to p_matrix uniform variable
 		pLoc = gl.glGetUniformLocation(renderingProgram, "p_matrix");
+
+		//Gets int pointer to norm_matrix uniform variable
+		nLoc = gl.glGetUniformLocation(renderingProgram, "norm_matrix");
 		
 		//Iterates through every single object (with a model) in the scene and updates their local positions into the world
 		//using their respective model matrix and based on the view, perspective matrices as well
 		for (int i = 0; i < numOfModels; i++){
 			mMat = modelMatrices[i];
+			invTrMat = invTrsMatrices[i];
+
+			material = DEFAULT_MATERIAL; //default is 0
 
 			//If Ghoul, then hover up and down
 			if (i == 0){ 
+				material = 1; //2nd material
 				temp.translation(0, (float) java.lang.Math.cos((double) ((deltaTime * floatingState)))/5000 * 10, 0);
 				mMat.mul(temp); 
 				floatingState += movementSpeed/10;
@@ -253,14 +303,23 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 			else if (i == 3) 
 				mMat.rotateY((float)Math.toRadians(rotationSpeed * deltaTime));
 			
+
+			mMat.invert(invTrMat);
+			invTrMat.transpose(invTrMat);
 			modelMatrices[i] = mMat;
+			invTrsMatrices[i] = invTrMat;
 
 			mvMat.identity();
 			mvMat.mul(vMat);
 			mvMat.mul(mMat);
 
+			installLights();
+
 			gl.glUniformMatrix4fv(mvLoc, 1, false, mvMat.get(vals));
+			gl.glUniformMatrix4fv(mLoc, 1, false, mMat.get(vals));
+			gl.glUniformMatrix4fv(vLoc, 1, false, vMat.get(vals));
 			gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
+			gl.glUniformMatrix4fv(nLoc, 1, false, invTrMat.get(vals));
 
 			gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[i*3]);
 			gl.glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
@@ -283,9 +342,20 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 
 		//Platform object
 		mMat = modelMatrices[numOfModels];
+		invTrMat = invTrsMatrices[numOfModels];
+
+		material = DEFAULT_MATERIAL; //default is 0
+
+		mMat.invert(invTrMat);
+		invTrMat.transpose(invTrMat);
+		modelMatrices[numOfModels] = mMat;
+		invTrsMatrices[numOfModels] = invTrMat;
+
 		mvMat.identity();
 		mvMat.mul(vMat);
 		mvMat.mul(mMat);
+
+		installLights();
 
 		gl.glUniformMatrix4fv(mvLoc, 1, false, mvMat.get(vals));
 		gl.glUniformMatrix4fv(pLoc, 1, false, pMat.get(vals));
@@ -338,12 +408,53 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 		}
 	}
 
+	private void installLights()
+	{	GL4 gl = (GL4) GLContext.getCurrentGL();
+		
+		lightPos[0]=currentLightPos.x(); lightPos[1]=currentLightPos.y(); lightPos[2]=currentLightPos.z();
+		
+		// get the locations of the light and material fields in the shader
+		globalAmbLoc = gl.glGetUniformLocation(renderingProgram, "globalAmbient");
+		ambLoc = gl.glGetUniformLocation(renderingProgram, "light.ambient");
+		diffLoc = gl.glGetUniformLocation(renderingProgram, "light.diffuse");
+		specLoc = gl.glGetUniformLocation(renderingProgram, "light.specular");
+		posLoc = gl.glGetUniformLocation(renderingProgram, "light.position");
+		mambLoc = gl.glGetUniformLocation(renderingProgram, "material.ambient");
+		mdiffLoc = gl.glGetUniformLocation(renderingProgram, "material.diffuse");
+		mspecLoc = gl.glGetUniformLocation(renderingProgram, "material.specular");
+		mshiLoc = gl.glGetUniformLocation(renderingProgram, "material.shininess");
+	
+		//  set the uniform light and material values in the shader
+		gl.glProgramUniform4fv(renderingProgram, globalAmbLoc, 1, globalAmbient, 0);
+		gl.glProgramUniform4fv(renderingProgram, ambLoc, 1, lightAmbient, 0);
+		gl.glProgramUniform4fv(renderingProgram, diffLoc, 1, lightDiffuse, 0);
+		gl.glProgramUniform4fv(renderingProgram, specLoc, 1, lightSpecular, 0);
+		gl.glProgramUniform3fv(renderingProgram, posLoc, 1, lightPos, 0);
+
+		switch (material){
+			case 0: 
+				gl.glProgramUniform4fv(renderingProgram, mambLoc, 1, goldMatAmb, 0);
+				gl.glProgramUniform4fv(renderingProgram, mdiffLoc, 1, goldMatDif, 0);
+				gl.glProgramUniform4fv(renderingProgram, mspecLoc, 1, goldMatSpe, 0);
+				gl.glProgramUniform1f(renderingProgram, mshiLoc, goldMatShi);
+				break;
+			case 1: 
+				gl.glProgramUniform4fv(renderingProgram, mambLoc, 1, bronzeMatAmb, 0);
+				gl.glProgramUniform4fv(renderingProgram, mdiffLoc, 1, bronzeMatDif, 0);
+				gl.glProgramUniform4fv(renderingProgram, mspecLoc, 1, bronzeMatSpe, 0);
+				gl.glProgramUniform1f(renderingProgram, mshiLoc, bronzeMatShi);
+				break;
+		}
+
+	}
+
 	private void setupVertices(){	
 		GL4 gl = (GL4) GLContext.getCurrentGL();
 		
 		gl.glGenVertexArrays(vao.length, vao, 0);
 		gl.glBindVertexArray(vao[0]);
 		gl.glGenBuffers(vbo.length, vbo, 0);
+		gl.glGenBuffers(skyboxVBO.length, skyboxVBO, 0);
 
 		for (int k = 0; k < numOfModels; k++){
 			numObjVertices = models[k].getNumVertices();
@@ -467,7 +578,7 @@ public class Code extends JFrame implements GLEventListener, KeyListener{
 			1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f, -1.0f
 		};
 
-		gl.glBindBuffer(GL_ARRAY_BUFFER, vbo[(3*(numOfModels + 4))]);
+		gl.glBindBuffer(GL_ARRAY_BUFFER, skyboxVBO[0]);
 		FloatBuffer cvertBuf = Buffers.newDirectFloatBuffer(cubeVertexPositions);
 		gl.glBufferData(GL_ARRAY_BUFFER, cvertBuf.limit()*4, cvertBuf, GL_STATIC_DRAW);
 
